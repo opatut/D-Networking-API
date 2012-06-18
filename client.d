@@ -6,6 +6,8 @@ import std.conv;
 import core.thread;
 
 import messages;
+import std.variant;
+
 
 
 
@@ -19,8 +21,8 @@ int main()
             msg.position = [12,13,14];
             msg.orientation = [55,66,77,88];
             msg.scale = [1,2,3];
-            writeln("SEND:\n", msg.toString());    
-            con.send(1234);
+            
+            writeln("SEND:\n", msg);
             con.send(msg);
             writeln();
         }

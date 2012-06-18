@@ -17,6 +17,13 @@ import std.stdio;
     import std.typetuple;
 import std.variant;
     import std.algorithm;
+import std.md5;
+
+ubyte[16u] uniqueId(T)() {
+    ubyte[16u] digest;
+    sum(digest, T.mangleof);
+    return digest;
+}
 
 class Server {
 private:
@@ -93,90 +100,64 @@ public:
     
 public:
     final void send(T...)( T msgs ) {
-        foreach(msg; msgs)
-        {
-            Variant var = msg;
-            this._send(*cast(ubyte[var.sizeof]*)&var);
+        foreach(msg; msgs) {
+            ubyte[] data = msg;
+            uint len = data.length;
+            writeln("send: ", typeid(T), uniqueId!(T));
+            ubyte[16u] type = uniqueId!(T);
+            this._socket.send(
+                *cast(ubyte[len.sizeof]*)&len ~
+                *cast(ubyte[type.sizeof]*)&type ~
+                data
+            );
         }
     }
 
         
-    final void receive(T...)(scope T vals ) {
+    final void receive(T...)(scope T vals ) {   
         static assert( T.length );
         alias TypeTuple!(T) Ops;
-        alias vals[0 .. $] ops;
-        
-        ubyte[][] msgs = this._receive();
-        foreach(msgdata; msgs)
-        {            
-            auto msg = *cast(Variant*)msgdata.ptr;
-            foreach( i, t; Ops )
-            {
-                alias ParameterTypeTuple!(t) Args;
-                auto op = ops[i];
-                if( msg.convertsTo!(Args) )
-                {
-                    this._convert(msg, op);
-                }
-            }
-        }
-    }
-    
-private:
-    final auto _convert(Op)(Variant msg, Op op )
-    {
-        alias ParameterTypeTuple!(Op) Args;
-
-        static if( Args.length == 1 )
-        {
-            static if( is( Args[0] == Variant ) )
-            {
-                op( msg );
-                return;
-            }
-            else
-            {
-                op( msg.get!(Args) );
-                return;
-            }
-        }
-        else
-        {
-            op( msg.get!(Tuple!(Args)).expand );
-            return;
-        }
-    }
-
-    void _send(Message message) {
+        alias vals[0 .. $] ops;        
         assert(this._socket.isAlive);
-        assert(message.length <= uint.max);
-        uint msgLength = message.length;
-        ubyte[4] msgLengthU = *cast(ubyte[4]*)&msgLength;
-        ptrdiff_t sendLength = this._socket.send(msgLengthU ~ message);
-        assert(sendLength == msgLength+4);
-    }
-    
-    @property Message[] _receive() {
-        assert(this._socket.isAlive);
-        ubyte[1024] buf;        
+        ubyte[1024] buf;
         ptrdiff_t len;
-        while((len = this._socket.receive(buf)) > 0)
-        {
+        while((len = this._socket.receive(buf)) > 0) {
             _buffer ~= buf[0..len];
         }
-        
         //decode next messages in buffer
-        Message[] messages;
-        while(true)
-        {
-            if(this._buffer.length < 4)
-                return messages;        
-            uint messageLengthInBytes = *cast(uint*)this._buffer.ptr;
-            if(messageLengthInBytes+4 < this._buffer.length)
-                return messages;
+        ubyte[][] messages;
+        while(true) {            
+            //has length and type?
+            enum beg = uint.sizeof + (ubyte[16u]).sizeof;
+            if(this._buffer.length < beg)
+                return;       
             
-            messages ~= this._buffer[4..messageLengthInBytes+4];
-            this._buffer = this._buffer[messageLengthInBytes+4..$];
+            uint msgLen = *cast(uint*)this._buffer.ptr;
+            ubyte[16u] msgType = *cast(ubyte[16u]*)(this._buffer.ptr + uint.sizeof);
+            
+            uint end = beg+msgLen;
+            
+            //has complete msg?
+            if(this._buffer.length < end)
+                return;
+            
+            ubyte[] msgData = this._buffer[beg .. end];
+            this._buffer = this._buffer[end .. $];
+                        
+            writeln("MSGDATA: ", msgData);
+            foreach( i, t; Ops ) {
+                alias ParameterTypeTuple!(t) Args;
+                auto op = ops[i];
+                
+                static if( Args.length == 1 ) {
+                    writeln("try: ",typeid(Args[0]),  uniqueId!(Args[0]), " with ", msgType);
+                    
+                    if(uniqueId!(Args[0]) == msgType) {
+                        writeln("ok");
+                        op(*cast(Args[0]*)msgData.ptr);
+                    }
+                }
+            }
         }
     }
 }

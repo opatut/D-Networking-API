@@ -17,4 +17,11 @@ public:
                 "Orientation: " ~ orientation.to!(string) ~ "\n" ~
                 "Scale: " ~ scale.to!(string);
     }
+    
+    ubyte[] data() {
+        auto tmp = position~orientation~scale;
+        return *cast(ubyte[tmp.sizeof]*)tmp.ptr;
+    }
+    
+    alias data this;
 }

@@ -4,24 +4,21 @@ import std.socket;
 import std.stdio;
 import std.conv;
 import core.thread;
+import std.variant;
 
 import messages;
 
-int main()
-{
+int main() {
     auto server = new Server(9861);
-    while(true)
-    {
+    while(true) {
         server.update();
         foreach(con; server.connections)
-        {
-            ubyte[][] msgs = con.receive();
-            writeln(msgs);
-            foreach(msg; msgs)
-            {
-                writeln(msg);
-                con.send(msg);
-            }
+        {//RECEIVE
+            writeln("RECV:");
+            con.receive(
+                (MsgCharacterUpdate msg){ con.send(*cast(ubyte[MsgCharacterUpdate.sizeof]*)&msg); },
+                (int msg){ con.send(*cast(ubyte[int.sizeof]*)&msg); }
+            );
         }
         Thread.sleep( dur!("msecs")( 1000 ) );
     }
