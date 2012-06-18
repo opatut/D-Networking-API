@@ -18,10 +18,21 @@ public:
                 "Scale: " ~ scale.to!(string);
     }
     
-    ubyte[] data() {
+    @property ubyte[] data() {
         auto tmp = position~orientation~scale;
-        return *cast(ubyte[tmp.sizeof]*)tmp.ptr;
+        return *cast(ubyte[Vector3.sizeof+Quaternion.sizeof+Vector3.sizeof]*)tmp.ptr;
     }
     
+    this(ubyte[] msg) {
+        position = *cast(Vector3*)msg.ptr;
+        orientation = *cast(Quaternion*)(msg.ptr+Vector3.sizeof);
+        scale = *cast(Vector3*)(msg.ptr+orientation.sizeof+scale.sizeof);
+    }
+    
+    //~ void opAssign(ubyte[] msg) {
+    //~ }
+    
     alias data this;
+    
+    //alias setdata this;
 }

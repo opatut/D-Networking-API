@@ -16,8 +16,8 @@ int main() {
         {//RECEIVE
             writeln("RECV:");
             con.receive(
-                (MsgCharacterUpdate msg){ con.send(*cast(ubyte[MsgCharacterUpdate.sizeof]*)&msg); },
-                (int msg){ con.send(*cast(ubyte[int.sizeof]*)&msg); }
+                (MsgCharacterUpdate msg){ con.send(msg); },
+                (int msg){ con.send(msg); }
             );
         }
         Thread.sleep( dur!("msecs")( 1000 ) );

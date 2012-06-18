@@ -101,9 +101,16 @@ public:
 public:
     final void send(T...)( T msgs ) {
         foreach(msg; msgs) {
-            ubyte[] data = msg;
+            ubyte[] data;
+
+            static if(isImplicitlyConvertible!(typeof(msg), ubyte[]))
+                data = msg;
+            else static if(isNumeric!(typeof(msg)))
+                data = *cast(ubyte[msg.sizeof]*)&msg;
+            else
+                static assert(false, "Type " ~ typeof(msg).stringof ~ " cannot be sent.");
+            
             uint len = data.length;
-            writeln("send: ", typeid(T), uniqueId!(T));
             ubyte[16u] type = uniqueId!(T);
             this._socket.send(
                 *cast(ubyte[len.sizeof]*)&len ~
@@ -113,7 +120,6 @@ public:
         }
     }
 
-        
     final void receive(T...)(scope T vals ) {   
         static assert( T.length );
         alias TypeTuple!(T) Ops;
@@ -144,19 +150,23 @@ public:
             ubyte[] msgData = this._buffer[beg .. end];
             this._buffer = this._buffer[end .. $];
                         
-            writeln("MSGDATA: ", msgData);
             foreach( i, t; Ops ) {
                 alias ParameterTypeTuple!(t) Args;
                 auto op = ops[i];
                 
                 static if( Args.length == 1 ) {
-                    writeln("try: ",typeid(Args[0]),  uniqueId!(Args[0]), " with ", msgType);
-                    
                     if(uniqueId!(Args[0]) == msgType) {
-                        writeln("ok");
-                        op(*cast(Args[0]*)msgData.ptr);
+                        writeln(msgData);
+                        static if(isImplicitlyConvertible!(Args[0], ubyte[]))
+                            op(cast(Args[0])msgData);
+                        else static if(isNumeric!(Args[0]))
+                            op(*cast(Args[0]*)msgData.ptr);
+                        else
+                            static assert(false, "Type " ~ Args[0].stringof ~ " is not supported.");
                     }
                 }
+                else
+                    static assert(false, "Only one Parameter supported.");
             }
         }
     }
