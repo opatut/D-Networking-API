@@ -2,28 +2,19 @@
  * A Very Simple Socket Wrapper.
  * It splits a TCP-Stream into 'Messages' 
  * which are ubyte[] with a specific length.
- * each message currently has an overhead of 4byte.
+ * each message currently has an overhead of 9byte.
  *
  * TODO: add checks for isAlive
  */
 module net;
 
 import std.socket;
-import std.conv;
 import std.stdio;
-    import std.range;
-    import std.traits;
-    import std.typecons;
-    import std.typetuple;
-import std.variant;
-    import std.algorithm;
-import std.md5;
-
-ubyte[16u] uniqueId(T)() {
-    ubyte[16u] digest;
-    sum(digest, T.mangleof);
-    return digest;
-}
+import std.range;
+import std.traits;
+import std.typecons;
+import std.typetuple;
+import std.algorithm;
 
 class Server {
 private:
@@ -31,33 +22,33 @@ private:
     Connection[] _connections;
     
 public:
+    ///
     this(ushort port) {
-        writeln("start server");
         this._socket = new TcpSocket();
-        writeln("bind server");
         this._socket.bind(new InternetAddress(port));
-        writeln("listen server");
         this._socket.listen(1);
-        writeln("setblcking server");
         this._socket.blocking = false;
-        writeln("alive server");
         assert(this._socket.isAlive);
     }
     
+    ///
     ~this() {
         this.close();
     }
     
+    ///
     void close() {
         assert(this._socket.isAlive);
         this._socket.shutdown(SocketShutdown.BOTH);
         this._socket.close();
     }
     
+    ///
     @property Connection[] connections() {
         return this._connections;
     }
     
+    ///
     void update() {
         assert(this._socket.isAlive);
         try {
@@ -67,7 +58,6 @@ public:
             auto con = new Connection();
             this._connections ~= con;
             con._socket = socket;
-            writeln("new socket");
 		} catch(SocketAcceptException e) {
             //writeln("socket accept error");
         }
@@ -75,32 +65,14 @@ public:
 }
 
 class Connection {
+private:   
     alias ubyte[] Message;
     Socket _socket;
     ubyte[] _buffer;
     
     string[] _localMap;
     string[] _remoteMap;
-    
-public:
-    static Connection connect(Address addr) {
-        auto con = new Connection();
-        con._socket = new TcpSocket(addr);
-        assert(con._socket.isAlive);
-        con._socket.blocking = false;
-        return con;
-    }
-    
-    ~this() {
-        this.close();
-    }
-    
-    void close() {
-        assert(this._socket.isAlive);
-        this._socket.shutdown(SocketShutdown.BOTH);
-        this._socket.close();
-    }
-    
+     
     alias ulong MangleLenType;
     
     enum MsgType : ubyte {
@@ -109,8 +81,33 @@ public:
     }
     
 public:
+    ///
+    static Connection connect(Address addr) {
+        auto con = new Connection();
+        con._socket = new TcpSocket(addr);
+        assert(con._socket.isAlive);
+        con._socket.blocking = false;        
+        return con;
+    }
+    
+    ///
+    ~this() {
+        this.close();
+    }
+    
+    ///
+    void close() {
+        if(!this._socket.isAlive)
+            return;
+        this._socket.shutdown(SocketShutdown.BOTH);
+        this._socket.close();
+    }    
+    
+public:
+    ///
     final void send(T)(T msg) {
-        assert(this._socket.isAlive);
+        if(!this._socket.isAlive)
+            return;
         auto pos = this._localMap.countUntil(T.mangleof);
         if(pos == -1) {
             //publish type first
@@ -141,8 +138,10 @@ public:
         );
     }
     
+    ///
     final void receive(T...)(scope T vals ) { 
-        assert(this._socket.isAlive);  
+        if(!this._socket.isAlive)
+            return;
         static assert(T.length, "receive needs at least one function.");
         alias TypeTuple!(T) Ops;
         alias vals[0 .. $] ops;
