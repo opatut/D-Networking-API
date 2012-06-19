@@ -3,35 +3,42 @@ D-Networking-API
 
 A Networking API for the D programming language. 
 Currently just a concept to use the message passing interface from std.concurrency. 
-overhead currently is 4byte(msgLength) + 16byte(typeHash)  per message.
+overhead currently is 9byte per message.
 
 
 ================
 
 Example usage:
 
+
     int main()
-    {
+    {    
         auto con = Connection.connect(new InternetAddress("127.0.0.1", 9861));
+        int i = 0;
         while(true)
         {
+            i++;
             {//SEND
                 MsgCharacterUpdate msg;
-                msg.position = [12,13,14];
-                msg.orientation = [55,66,77,88];
-                msg.scale = [1,2,3];
+                msg.position = [i,i,i];
+                msg.orientation = [i,i,i,i];
+                msg.scale = [i,i,i];
                 
-                writeln("SEND:\n", msg);
+                writeln("SEND:\n");
+                //con.send(12345);
                 con.send(msg);
+                writeln("--------");
                 writeln();
             }
             
             {//RECEIVE
                 writeln("RECV:");
                 con.receive(
-                    (MsgCharacterUpdate msg){ writeln("MsgCharUpdate: ", msg); },
+                    (MsgCharacterUpdate msg){ writeln(msg); },
                     (int i){writeln("INT: ", i);}
                 );
+                writeln("--------");
+                writeln();
             }
             
             Thread.sleep( dur!("msecs")( 1000 ) );
