@@ -79,6 +79,9 @@ class Connection {
     Socket _socket;
     ubyte[] _buffer;
     
+    string[] _localMap;
+    string[] _remoteMap;
+    
 public:
     static Connection connect(Address addr) {
         auto con = new Connection();
@@ -98,76 +101,121 @@ public:
         this._socket.close();
     }
     
-public:
-    final void send(T...)( T msgs ) {
-        foreach(msg; msgs) {
-            ubyte[] data;
-
-            static if(isImplicitlyConvertible!(typeof(msg), ubyte[]))
-                data = msg;
-            else static if(isNumeric!(typeof(msg)))
-                data = *cast(ubyte[msg.sizeof]*)&msg;
-            else
-                static assert(false, "Type " ~ typeof(msg).stringof ~ " cannot be sent.");
-            
-            uint len = data.length;
-            ubyte[16u] type = uniqueId!(T);
-            this._socket.send(
-                *cast(ubyte[len.sizeof]*)&len ~
-                *cast(ubyte[type.sizeof]*)&type ~
-                data
-            );
-        }
+    alias ulong MangleLenType;
+    
+    enum MsgType : ubyte {
+        PublishType,
+        SendMsg
     }
-
-    final void receive(T...)(scope T vals ) {   
-        static assert( T.length );
+    
+public:
+    final void send(T)(T msg) {
+        assert(this._socket.isAlive);
+        auto pos = this._localMap.countUntil(T.mangleof);
+        if(pos == -1) {
+            //publish type first
+            this._localMap ~= T.mangleof;
+            MangleLenType mangleLen = T.mangleof.length;
+            this._socket.send(
+                MsgType.PublishType ~ 
+                *cast(ubyte[MangleLenType.sizeof]*)&mangleLen ~ 
+                cast(ubyte[])T.mangleof
+            );
+            pos = this._localMap.length-1;
+            debug {                
+                writeln(
+                "sent: ",MsgType.PublishType ~ 
+                *cast(ubyte[MangleLenType.sizeof]*)&mangleLen ~ 
+                cast(ubyte[])T.mangleof
+                );
+            }
+        }
+        
+        //send msg
+        uint msgLen = msg.length;
+        this._socket.send(
+            MsgType.SendMsg ~
+            *cast(ubyte[uint.sizeof]*)&pos ~
+            *cast(ubyte[uint.sizeof]*)&msgLen ~
+            cast(ubyte[])msg
+        );
+    }
+    
+    final void receive(T...)(scope T vals ) { 
+        assert(this._socket.isAlive);  
+        static assert(T.length, "receive needs at least one function.");
         alias TypeTuple!(T) Ops;
-        alias vals[0 .. $] ops;        
+        alias vals[0 .. $] ops;
+        
+        //get all bytes from socket and store in this._buffer
         assert(this._socket.isAlive);
         ubyte[1024] buf;
         ptrdiff_t len;
         while((len = this._socket.receive(buf)) > 0) {
-            _buffer ~= buf[0..len];
+            this._buffer ~= buf[0..len];
         }
-        //decode next messages in buffer
-        ubyte[][] messages;
-        while(true) {            
-            //has length and type?
-            enum beg = uint.sizeof + (ubyte[16u]).sizeof;
-            if(this._buffer.length < beg)
-                return;       
-            
-            uint msgLen = *cast(uint*)this._buffer.ptr;
-            ubyte[16u] msgType = *cast(ubyte[16u]*)(this._buffer.ptr + uint.sizeof);
-            
-            uint end = beg+msgLen;
-            
-            //has complete msg?
-            if(this._buffer.length < end)
+        
+        //enough buffer to decode a MsgType?
+        if(this._buffer.length < MsgType.sizeof)
+            return;
+        
+        MsgType msgType = *cast(MsgType*)this._buffer[0 .. MsgType.sizeof].ptr;
+        final switch(msgType) {
+        case MsgType.PublishType:
+            //enough buffer to decode mangleLen?
+            if(this._buffer.length < MsgType.sizeof + MangleLenType.sizeof)
                 return;
             
-            ubyte[] msgData = this._buffer[beg .. end];
-            this._buffer = this._buffer[end .. $];
-                        
+            MangleLenType mangleLen = *cast(MangleLenType*)this._buffer[MsgType.sizeof .. MsgType.sizeof + MangleLenType.sizeof].ptr;
+            
+            //enough buffer to decode mangle?
+            if(this._buffer.length < MsgType.sizeof + MangleLenType.sizeof + cast(size_t)mangleLen)
+                return;
+            
+            string mangle = cast(string)this._buffer[MsgType.sizeof + MangleLenType.sizeof .. MsgType.sizeof + MangleLenType.sizeof + cast(size_t)mangleLen];
+            
+            this._remoteMap ~= mangle;
+            this._buffer = this._buffer[MsgType.sizeof + MangleLenType.sizeof + cast(size_t)mangleLen .. $];          
+            
+            break;
+        case MsgType.SendMsg:
+            //enough buffer to decode typeID
+            if(this._buffer.length < MsgType.sizeof + uint.sizeof)
+                return;
+            
+            uint pos = *cast(uint*)this._buffer[MsgType.sizeof .. MsgType.sizeof + uint.sizeof].ptr;
+            assert(pos < this._remoteMap.length, "could not find mangleof in _remoteMap."); //TODO: add that check in release?!
+        
+            string mangle = this._remoteMap[pos];
+            
             foreach( i, t; Ops ) {
                 alias ParameterTypeTuple!(t) Args;
                 auto op = ops[i];
                 
                 static if( Args.length == 1 ) {
-                    if(uniqueId!(Args[0]) == msgType) {
-                        writeln(msgData);
-                        static if(isImplicitlyConvertible!(Args[0], ubyte[]))
-                            op(cast(Args[0])msgData);
-                        else static if(isNumeric!(Args[0]))
-                            op(*cast(Args[0]*)msgData.ptr);
-                        else
-                            static assert(false, "Type " ~ Args[0].stringof ~ " is not supported.");
+                    if(Args[0].mangleof == mangle) {
+                        
+                        //enough buffer to decode msgLen?
+                        if(this._buffer.length < MsgType.sizeof + uint.sizeof + uint.sizeof)
+                            return;
+                        
+                        uint msgLen = *cast(uint*)this._buffer[MsgType.sizeof + uint.sizeof .. MsgType.sizeof + uint.sizeof + uint.sizeof].ptr;
+                        
+                        //enough buffer to decode msg?
+                        if(this._buffer.length < MsgType.sizeof + uint.sizeof + uint.sizeof + msgLen)
+                            return;
+                        
+                        auto msg = *cast(Args[0]*)this._buffer[MsgType.sizeof + uint.sizeof + uint.sizeof .. MsgType.sizeof + uint.sizeof + uint.sizeof + msgLen].ptr;
+                        this._buffer = this._buffer[MsgType.sizeof + uint.sizeof + uint.sizeof + msgLen .. $];
+                        
+                        op(msg);
                     }
                 }
                 else
-                    static assert(false, "Only one Parameter supported.");
-            }
+                    static assert(false, "Only one Parameter supported in receive functions.");
+            }                
+            
+            break;
         }
     }
 }
