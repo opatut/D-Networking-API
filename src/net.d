@@ -129,7 +129,7 @@ public:
         }
         
         //send msg
-        uint msgLen = msg.length;
+        uint msgLen = cast(uint)msg.length;
         this._socket.send(
             MsgType.SendMsg ~
             *cast(ubyte[uint.sizeof]*)&pos ~
